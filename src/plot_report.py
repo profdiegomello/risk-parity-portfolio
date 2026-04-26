@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-import seaborn as sns
+import matplotlib.ticker as ticker
 import os
 import glob
 import argparse
@@ -25,55 +25,65 @@ def plot_wealth_index(output_dir, k_filter, quartile_filter, filename="wealth_in
         'naive': 'Naive (1/K)'
     }
 
-    # Leitura e alinhamento das séries temporais
     for arquivo in arquivos:
-        # Extrai a estratégia do nome do arquivo
-        nome_base = os.path.basename(arquivo)
-        estrategia = nome_base.split('_K')[0].replace('oos_ts_', '')
-        label = mapeamento_nomes.get(estrategia, estrategia)
-        
-        df = pd.read_csv(arquivo, index_col=0, parse_dates=True)
-        # Calcula o índice de riqueza (Capital Inicial = R$ 1,00)
-        df_acumulado[label] = (1 + df['Retorno']).cumprod()
+        try:
+            nome_base = os.path.basename(arquivo)
+            estrategia = nome_base.split('_K')[0].replace('oos_ts_', '')
+            label = mapeamento_nomes.get(estrategia, estrategia)
+            
+            df = pd.read_csv(arquivo, index_col=0, parse_dates=True)
+            
+            if df.empty:
+                continue
+                
+            # Cálculo do Wealth Index (Capital Acumulado)
+            serie_acumulada = (1 + df).cumprod()
+            df_acumulado[label] = serie_acumulada.iloc[:, 0]
+        except Exception as e:
+            print(f"[AVISO] Erro ao processar {arquivo}: {e}. Pulando modelo.")
+            continue
 
-    # Configuração estética acadêmica
-    sns.set_theme(style="whitegrid", context="paper", font_scale=1.2)
-    plt.figure(figsize=(10, 6))
+    if df_acumulado.empty:
+        print("[ERRO] Nenhum dado válido para plotagem.")
+        return
 
-    # Plotagem com filtros de nomes estritos para evitar sobreposição de estilos
+    plt.figure(figsize=(12, 7))
+    
     for coluna in df_acumulado.columns:
-        if 'Markowitz' in coluna:
-            plt.plot(df_acumulado.index, df_acumulado[coluna], label=coluna, linestyle=':', color='crimson', linewidth=2)
-        elif 'GMV' in coluna:
-            plt.plot(df_acumulado.index, df_acumulado[coluna], label=coluna, linestyle='--', color='darkmagenta', linewidth=2)
+        if 'Risk Parity' in coluna:
+            plt.plot(df_acumulado.index, df_acumulado[coluna], label=coluna, linewidth=2)
         elif 'Naive' in coluna:
-            plt.plot(df_acumulado.index, df_acumulado[coluna], label=coluna, linestyle='-.', color='gray', linewidth=2)
-        elif 'Non-Convex' in coluna:
-            plt.plot(df_acumulado.index, df_acumulado[coluna], label=coluna, linestyle='-', color='darkorange', linewidth=2)
-        elif 'Convex' in coluna:
-            plt.plot(df_acumulado.index, df_acumulado[coluna], label=coluna, linestyle='-', color='navy', linewidth=2.5)
+            plt.plot(df_acumulado.index, df_acumulado[coluna], label=coluna, linestyle='--', color='gray', alpha=0.7)
         else:
-            plt.plot(df_acumulado.index, df_acumulado[coluna], label=coluna, linestyle='-', color='black', linewidth=1)
+            plt.plot(df_acumulado.index, df_acumulado[coluna], label=coluna, alpha=0.8)
 
+    # Configuração do Eixo X (Datas)
+    ax = plt.gca()
+    # Rotaciona 90 graus, diminui a fonte e alinha verticalmente
+    plt.xticks(rotation=90, fontsize='x-small')
+    
+    # Garante que as datas apareçam de forma legível independente da janela
+    ax.xaxis.set_major_locator(ticker.MaxNLocator(nbins=20)) 
+    
     plt.title(f"Evolução do Capital Acumulado (Wealth Index) - K={k_filter}, Top {int(quartile_filter*100)}% Sharpe", fontweight='bold')
     plt.ylabel("Capital Indexado (Base = 1.0)")
-    plt.xlabel("Tempo (Data de Rebalanceamento)")
-    plt.axhline(1.0, color='black', linewidth=1)
+    plt.xlabel("Data de Referência")
+    plt.axhline(1.0, color='black', linewidth=0.8, linestyle=':')
     
-    # Legenda alocada no rodapé (fora do gráfico), em duas colunas
-    plt.legend(loc='upper center', bbox_to_anchor=(0.5, -0.15), ncol=2, frameon=False)
+    plt.legend(loc='upper center', bbox_to_anchor=(0.5, -0.2), ncol=3, frameon=True)
+    plt.grid(True, alpha=0.3, linestyle='--')
     
     plt.tight_layout()
     caminho_saida = os.path.join(output_dir, filename)
     plt.savefig(caminho_saida, dpi=300, bbox_inches='tight')
-    print(f"[INFO] Gráfico comparativo gerado: {caminho_saida}")
+    print(f"[INFO] Gráfico gerado com sucesso: {caminho_saida}")
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Gerador de Gráficos para o Artigo do SBPO')
-    parser.add_argument('--output_dir', type=str, required=True, help='Diretório onde estão os CSVs gerados.')
-    parser.add_argument('--k', type=int, required=True, help='Cardinalidade K usada no experimento para filtrar os arquivos.')
-    parser.add_argument('--quartile', type=float, required=True, help='Filtro de quartil usado no experimento.')
+    parser = argparse.ArgumentParser(description='Gerador de Gráficos SBPO 2026')
+    parser.add_argument('--output_dir', type=str, required=True)
+    parser.add_argument('--k', type=int, required=True)
+    parser.add_argument('--quartile', type=float, required=True)
+    parser.add_argument('--filename', type=str, default="comparativo_portfolio.png")
     
     args = parser.parse_args()
-    
-    plot_wealth_index(args.output_dir, args.k, args.quartile, filename=f"comparativo_K{args.k}_Q{int(args.quartile*100)}.png")
+    plot_wealth_index(args.output_dir, args.k, args.quartile, args.filename)
