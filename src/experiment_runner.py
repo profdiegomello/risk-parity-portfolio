@@ -39,6 +39,7 @@ def run_backtest(args):
     pesos_historicos = np.zeros(len(universo_ativos)) 
     portfolio_out_of_sample = []
     datas_oos_globais = []
+    log_pesos_diarios = [] 
 
     print(f"============================================================")
     print(f"INICIANDO BACKTEST: {args.strategy.upper()} | K={args.k}")
@@ -53,11 +54,14 @@ def run_backtest(args):
         
         if out_sample.empty: break
 
-        print(f"[*] Rebalanceamento: {data_t.strftime('%Y-%m-%d')} | Train: {len(in_sample)} dias | Test: {len(out_sample)} dias")
-
-        ativos_validos = [a for a in universo_ativos if in_sample[a].notna().all() and out_sample[a].notna().all()]
+        # Filtro de Liquidez/Volatilidade para evitar matrizes singulares
+        vols_in = in_sample[universo_ativos].std()
+        ativos_validos = vols_in[vols_in > 1e-6].index.intersection(out_sample.columns).tolist()
+        
         in_sample = in_sample[ativos_validos + [rf_col]]
         out_sample = out_sample[ativos_validos]
+        
+        print(f"[*] Rebalanceamento: {data_t.strftime('%Y-%m-%d')} | Train: {len(in_sample)} dias | Test: {len(out_sample)} dias")
         
         rf_dinamico = in_sample[rf_col].mean()
         ret_medios = in_sample[ativos_validos].mean().values
@@ -69,7 +73,6 @@ def run_backtest(args):
         ativos_quartil_idx = np.where(sharpes_hist >= percentil_corte)[0]
         
         if len(ativos_quartil_idx) < args.k:
-            print(f"[AVISO] Universo filtrado ({len(ativos_quartil_idx)}) menor que K ({args.k}). Pulando janela.")
             continue
             
         pesos_novos_janela = np.zeros(len(ativos_validos))
@@ -77,13 +80,12 @@ def run_backtest(args):
         if args.strategy == 'naive':
             top_k, p_naive = naive_1_k_allocation(ret_medios[ativos_quartil_idx], cov_matrix[np.ix_(ativos_quartil_idx, ativos_quartil_idx)], rf_dinamico, args.k)
             pesos_novos_janela[ativos_quartil_idx[top_k]] = p_naive[top_k]
-            
         else:
             algorithm = BRKGA(n_elites=args.n_elites, n_offsprings=args.n_offsprings, n_mutants=args.n_mutants, bias=args.bias)
             
             if args.strategy in ['rp_convex', 'rp_nonconvex']:
                 form = 'convex' if args.strategy == 'rp_convex' else 'non_convex'
-                problem = RiskBudgetingBRKGA(cov_matrix[np.ix_(ativos_quartil_idx, ativos_quartil_idx)], args.k, formulation=form, solver_method=args.solver)
+                problem = RiskBudgetingBRKGA(cov_matrix[np.ix_(ativos_quartil_idx, ativos_quartil_idx)], args.k, formulation=form, solver_method=args.solver, seed=args.seed)
             elif args.strategy == 'msr':
                 problem = MaximumSharpeBRKGA(ret_medios[ativos_quartil_idx], cov_matrix[np.ix_(ativos_quartil_idx, ativos_quartil_idx)], rf_dinamico, args.k)
             elif args.strategy == 'gmv':
@@ -91,8 +93,8 @@ def run_backtest(args):
 
             res = pymoo_minimize(problem, algorithm, ("n_gen", args.n_gen), seed=args.seed, verbose=args.verbose)
             
-            indices_selecionados_sub = problem._decode(res.X)
-            indices_globais = ativos_quartil_idx[indices_selecionados_sub]
+            indices_sel = problem._decode(res.X)
+            indices_globais = ativos_quartil_idx[indices_sel]
             sub_cov = cov_matrix[np.ix_(indices_globais, indices_globais)]
 
             if args.strategy == 'rp_convex':
@@ -100,23 +102,15 @@ def run_backtest(args):
                 res_cont = minimize(problem._obj_convex, y0, args=(sub_cov, problem.b_target), method=args.solver, bounds=tuple((1e-8, None) for _ in range(args.k)))
                 w_final = res_cont.x / np.sum(res_cont.x)
             elif args.strategy == 'rp_nonconvex':
-                bounds = tuple((0.0, 1.0) for _ in range(args.k))
                 x0 = np.ones(args.k) / args.k
                 constraints = {'type': 'eq', 'fun': lambda w: np.sum(w) - 1.0}
-                res_cont = minimize(problem._obj_non_convex, x0, args=(sub_cov, problem.b_target), method='SLSQP', bounds=bounds, constraints=constraints)
+                res_cont = minimize(problem._obj_non_convex, x0, args=(sub_cov, problem.b_target), method='SLSQP', bounds=tuple((0.0, 1.0) for _ in range(args.k)), constraints=constraints)
                 w_final = res_cont.x / np.sum(res_cont.x)
             elif args.strategy == 'msr':
-                sub_ret = ret_medios[indices_globais]
-                bounds = tuple((0.0, 1.0) for _ in range(args.k))
-                x0 = np.ones(args.k) / args.k
-                constraints = {'type': 'eq', 'fun': lambda w: np.sum(w) - 1.0}
-                res_cont = minimize(problem._neg_sharpe, x0, args=(sub_ret, sub_cov, rf_dinamico), method='SLSQP', bounds=bounds, constraints=constraints)
+                res_cont = minimize(problem._neg_sharpe, np.ones(args.k)/args.k, args=(ret_medios[indices_globais], sub_cov, rf_dinamico), method='SLSQP', bounds=tuple((0.0, 1.0) for _ in range(args.k)), constraints={'type': 'eq', 'fun': lambda w: np.sum(w) - 1.0})
                 w_final = res_cont.x
             elif args.strategy == 'gmv':
-                bounds = tuple((0.0, 1.0) for _ in range(args.k))
-                x0 = np.ones(args.k) / args.k
-                constraints = {'type': 'eq', 'fun': lambda w: np.sum(w) - 1.0}
-                res_cont = minimize(problem._obj_variance, x0, args=(sub_cov,), method='SLSQP', bounds=bounds, constraints=constraints)
+                res_cont = minimize(problem._obj_variance, np.ones(args.k)/args.k, args=(sub_cov,), method='SLSQP', bounds=tuple((0.0, 1.0) for _ in range(args.k)), constraints={'type': 'eq', 'fun': lambda w: np.sum(w) - 1.0})
                 w_final = res_cont.x
                 
             pesos_novos_janela[indices_globais] = w_final
@@ -129,13 +123,36 @@ def run_backtest(args):
         turnover = metrics.calculate_turnover(pesos_historicos, pesos_novos_global)
         custo_execucao = turnover * args.transaction_cost
         
-        retornos_diarios_oos = out_sample.dot(pesos_novos_janela)
-        retornos_diarios_oos.iloc[0] -= custo_execucao
+        peso_diario_atual = pesos_novos_global.copy()
         
-        portfolio_out_of_sample.extend(retornos_diarios_oos.values)
-        datas_oos_globais.extend(out_sample.index)
-        
-        pesos_historicos = pesos_novos_global 
+        for data_dia in out_sample.index:
+            registro = {'Data': data_dia}
+            for i, ativo in enumerate(universo_ativos):
+                registro[ativo] = peso_diario_atual[i]
+            log_pesos_diarios.append(registro)
+            
+            w_validos = np.array([peso_diario_atual[universo_ativos.index(a)] for a in ativos_validos])
+            
+            retorno_dia_portfolio = np.dot(w_validos, out_sample.loc[data_dia].values)
+            
+            if data_dia == out_sample.index[0]:
+                retorno_dia_portfolio -= custo_execucao
+                
+            portfolio_out_of_sample.append(retorno_dia_portfolio)
+            datas_oos_globais.append(data_dia)
+            
+            retornos_dia_ativos = out_sample.loc[data_dia].values
+            
+            w_drifted = w_validos * (1 + retornos_dia_ativos)
+            soma_w = np.sum(w_drifted)
+            if soma_w > 0:
+                w_drifted /= soma_w
+                
+            peso_diario_atual = np.zeros(len(universo_ativos))
+            for i, a in enumerate(ativos_validos):
+                peso_diario_atual[universo_ativos.index(a)] = w_drifted[i]
+
+        pesos_historicos = peso_diario_atual 
 
     ts_retornos = pd.Series(portfolio_out_of_sample, index=datas_oos_globais)
     rf_medio_anual = df_retornos[rf_col].mean() * 252
@@ -143,6 +160,7 @@ def run_backtest(args):
     ret_anual = metrics.annualized_return(ts_retornos)
     vol_anual = metrics.annualized_volatility(ts_retornos)
     sharpe = metrics.sharpe_ratio(ts_retornos, rf_medio_anual)
+    sortino = metrics.sortino_ratio(ts_retornos, rf_medio_anual)
     mdd = metrics.maximum_drawdown(ts_retornos)
 
     print(f"\n============================================================")
@@ -151,6 +169,7 @@ def run_backtest(args):
     print(f"Retorno Anualizado : {ret_anual:.2%}")
     print(f"Volatilidade Anual : {vol_anual:.2%}")
     print(f"Índice de Sharpe   : {sharpe:.4f}")
+    print(f"Índice de Sortino  : {sortino:.4f}")
     print(f"Maximum Drawdown   : {mdd:.2%}")
     print(f"============================================================\n")
 
@@ -159,6 +178,10 @@ def run_backtest(args):
         
         nome_arquivo_ts = f"oos_ts_{args.strategy}_K{args.k}_Q{int(args.quartile_filter*100)}.csv"
         ts_retornos.to_csv(os.path.join(args.output_dir, nome_arquivo_ts), header=['Retorno'])
+        
+        df_pesos_diarios = pd.DataFrame(log_pesos_diarios).set_index('Data')
+        nome_arquivo_pesos = f"pesos_diarios_{args.strategy}_K{args.k}_Q{int(args.quartile_filter*100)}.csv"
+        df_pesos_diarios.to_csv(os.path.join(args.output_dir, nome_arquivo_pesos))
         
         arquivo_mestre = os.path.join(args.output_dir, "resultados_mestre.csv")
         cabecalho = not os.path.exists(arquivo_mestre)
@@ -171,11 +194,20 @@ def run_backtest(args):
             'Retorno_Anual': [ret_anual],
             'Volatilidade_Anual': [vol_anual],
             'Sharpe': [sharpe],
+            'Sortino': [sortino],
             'MDD': [mdd]
         })
         
         df_metricas.to_csv(arquivo_mestre, mode='a', header=cabecalho, index=False)
-        print(f"[INFO] Resultados salvos no diretório: {args.output_dir}")
+        
+        txt_path = os.path.join(args.output_dir, "tabela_resumo_latex.txt")
+        exists = os.path.exists(txt_path)
+        with open(txt_path, "a") as f:
+            if not exists or os.path.getsize(txt_path) == 0:
+                f.write("Modelo\tRet_Anual\tVol_Anual\tSharpe\tMDD\tSortino\n")
+            f.write(f"{args.strategy.upper()}\t{ret_anual:.4f}\t{vol_anual:.4f}\t{sharpe:.4f}\t{mdd:.4f}\t{sortino:.4f}\n")
+            
+        print(f"[INFO] Resultados e pesos diários salvos no diretório: {args.output_dir}")
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Backtester: Paridade de Risco vs Benchmarks')

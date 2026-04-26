@@ -10,9 +10,31 @@ def annualized_volatility(daily_returns, days_per_year=252):
     return np.std(daily_returns, ddof=1) * np.sqrt(days_per_year)
 
 def sharpe_ratio(daily_returns, rf_annual, days_per_year=252):
+    rf_daily = (1 + rf_annual) ** (1/days_per_year) - 1
+    excess_returns = daily_returns - rf_daily
+    
+    mean_excess = np.mean(excess_returns)
+    std_returns = np.std(daily_returns, ddof=1)
+    
+    if std_returns > 0:
+        return (mean_excess / std_returns) * np.sqrt(days_per_year)
+    return 0.0
+
+def sortino_ratio(daily_returns, rf_annual, days_per_year=252):
+    rf_daily = (1 + rf_annual) ** (1/days_per_year) - 1
+    excess_returns = daily_returns - rf_daily
+    
+    negative_excess = excess_returns[excess_returns < 0]
+    
+    if len(negative_excess) == 0:
+        return 0.0
+        
+    downside_std = np.sqrt(np.mean(negative_excess**2)) * np.sqrt(days_per_year)
     ann_ret = annualized_return(daily_returns, days_per_year)
-    ann_vol = annualized_volatility(daily_returns, days_per_year)
-    return (ann_ret - rf_annual) / ann_vol if ann_vol > 0 else 0.0
+    
+    if downside_std > 0:
+        return (ann_ret - rf_annual) / downside_std
+    return 0.0
 
 def maximum_drawdown(daily_returns):
     cumulative = (1 + daily_returns).cumprod()
@@ -21,5 +43,4 @@ def maximum_drawdown(daily_returns):
     return np.min(drawdowns)
 
 def calculate_turnover(old_weights_vector, new_weights_vector):
-    # Assume que os vetores estão alinhados pelo universo total de ativos (N)
     return np.sum(np.abs(new_weights_vector - old_weights_vector))

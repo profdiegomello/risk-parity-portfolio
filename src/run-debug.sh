@@ -1,20 +1,23 @@
 # General Parameters
-TRANSACTION_COST=0.05
+TRANSACTION_COST=0.005
 TEST_WINDOW=3
 GENERATIONS=30
 K=15
 SEED=$RANDOM
+TIMESTAMP=$(date +"%Y-%m-%d-%H-%M-%S")
+OUTPUT_FOLDER="./$TIMESTAMP-SBPO-2026"
+QUARTILE=0.25
 
 # Convex
 python3 experiment_runner.py \
     --input ../dat/dataset-0.csv \
-    --output_dir ./resultados_sbpo_debug \
+    --output_dir $OUTPUT_FOLDER \
     --strategy rp_convex \
     --solver SLSQP \
     --k $K \
     --train_window 12 \
     --test_window $TEST_WINDOW \
-    --quartile_filter 0.25 \
+    --quartile_filter $QUARTILE \
     --transaction_cost $TRANSACTION_COST \
     --n_elites 10 \
     --n_offsprings 35 \
@@ -31,13 +34,13 @@ echo
 # Non-Convex
 python3 experiment_runner.py \
     --input ../dat/dataset-0.csv \
-    --output_dir ./resultados_sbpo_debug \
+    --output_dir $OUTPUT_FOLDER \
     --strategy rp_nonconvex \
     --solver SLSQP \
     --k $K \
     --train_window 12 \
     --test_window $TEST_WINDOW \
-    --quartile_filter 0.25 \
+    --quartile_filter $QUARTILE \
     --transaction_cost $TRANSACTION_COST \
     --n_elites 10 \
     --n_offsprings 35 \
@@ -55,12 +58,12 @@ echo
 # Naive
 python3 experiment_runner.py \
     --input ../dat/dataset-0.csv \
-    --output_dir ./resultados_sbpo_debug \
+    --output_dir $OUTPUT_FOLDER \
     --strategy naive \
     --k $K \
     --train_window 12 \
     --test_window $TEST_WINDOW \
-    --quartile_filter 0.25 \
+    --quartile_filter $QUARTILE \
     --transaction_cost $TRANSACTION_COST \
     --n_elites 10 \
     --n_offsprings 35 \
@@ -78,13 +81,13 @@ echo
 # Global Minimum Variance 
 python3 experiment_runner.py \
     --input ../dat/dataset-0.csv \
-    --output_dir ./resultados_sbpo_debug \
+    --output_dir $OUTPUT_FOLDER \
     --strategy gmv \
     --solver SLSQP \
     --k $K \
     --train_window 12 \
     --test_window $TEST_WINDOW \
-    --quartile_filter 0.25 \
+    --quartile_filter $QUARTILE \
     --transaction_cost $TRANSACTION_COST \
     --n_elites 10 \
     --n_offsprings 35 \
@@ -102,13 +105,13 @@ echo
 # Minimum Sharp 
 python3 experiment_runner.py \
     --input ../dat/dataset-0.csv \
-    --output_dir ./resultados_sbpo_debug \
+    --output_dir $OUTPUT_FOLDER \
     --strategy msr \
     --solver SLSQP \
     --k $K \
     --train_window 12 \
     --test_window $TEST_WINDOW \
-    --quartile_filter 0.25 \
+    --quartile_filter $QUARTILE \
     --transaction_cost $TRANSACTION_COST \
     --n_elites 10 \
     --n_offsprings 35 \
@@ -119,4 +122,4 @@ python3 experiment_runner.py \
     --verbose
     
 # Consolida o resultado
-python3 plot_report.py --output_dir ./resultados_sbpo_debug --k 10 --quartile 0.25
+python3 plot_report.py --output_dir $OUTPUT_FOLDER --k $K --quartile $QUARTILE

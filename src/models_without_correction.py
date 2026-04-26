@@ -3,15 +3,13 @@ from scipy.optimize import minimize, differential_evolution
 from pymoo.core.problem import ElementwiseProblem
 
 class RiskBudgetingBRKGA(ElementwiseProblem):
-    def __init__(self, cov_matrix, k_cardinality, formulation='convex', solver_method='SLSQP', 
-                 solver_tol=1e-6, solver_maxiter=100, seed=42):
+    def __init__(self, cov_matrix, k_cardinality, formulation='convex', solver_method='SLSQP', solver_tol=1e-6, solver_maxiter=100):
         self.cov_matrix = cov_matrix
         self.k = k_cardinality
         self.formulation = formulation
         self.solver_method = solver_method
         self.solver_tol = solver_tol
         self.solver_maxiter = solver_maxiter
-        self.seed = seed
         self.n_assets = cov_matrix.shape[0]
         self.b_target = np.ones(self.k) / self.k
         super().__init__(n_var=self.n_assets, n_obj=1, xl=0.0, xu=1.0)
@@ -40,13 +38,11 @@ class RiskBudgetingBRKGA(ElementwiseProblem):
                                method='SLSQP', bounds=bounds, constraints=constraints, 
                                tol=self.solver_tol, options={'maxiter': self.solver_maxiter})
                 wn = res.x / np.sum(res.x)
-                out["F"] = np.sqrt(wn.T @ sub_cov @ wn)
             else:
                 res = differential_evolution(self._obj_non_convex, bounds, args=(sub_cov, self.b_target), 
-                                             tol=self.solver_tol, maxiter=self.solver_maxiter, 
-                                             popsize=5, seed=self.seed)
+                                             tol=self.solver_tol, maxiter=self.solver_maxiter, popsize=5)
                 wn = res.x / np.sum(res.x)
-                out["F"] = np.sqrt(wn.T @ sub_cov @ wn)
+            out["F"] = np.sqrt(wn.T @ sub_cov @ wn)
 
     def _obj_convex(self, y, cov, b):
         return 0.5 * (y.T @ cov @ y) - np.sum(b * np.log(y))
@@ -93,12 +89,7 @@ class MaximumSharpeBRKGA(ElementwiseProblem):
         port_ret = np.dot(w, ret)
         port_vol = np.sqrt(w.T @ cov @ w)
         if port_vol <= 1e-10: return float('inf')
-        
-        excess_ret = port_ret - rf
-        if excess_ret <= 0:
-            return 1e10
-            
-        return - excess_ret / port_vol
+        return - (port_ret - rf) / port_vol
 
 class MinimumVarianceBRKGA(ElementwiseProblem):
     def __init__(self, cov_matrix, k_cardinality, solver_tol=1e-6, solver_maxiter=100):
