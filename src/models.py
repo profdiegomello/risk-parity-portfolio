@@ -4,7 +4,7 @@ from pymoo.core.problem import ElementwiseProblem
 
 class RiskBudgetingBRKGA(ElementwiseProblem):
     def __init__(self, cov_matrix, k_cardinality, formulation='convex', solver_method='SLSQP', 
-                 solver_tol=1e-6, solver_maxiter=100, seed=42):
+                 solver_tol=1e-6, solver_maxiter=100, seed=42, **kwargs):
         self.cov_matrix = cov_matrix
         self.k = k_cardinality
         self.formulation = formulation
@@ -14,7 +14,7 @@ class RiskBudgetingBRKGA(ElementwiseProblem):
         self.seed = seed
         self.n_assets = cov_matrix.shape[0]
         self.b_target = np.ones(self.k) / self.k
-        super().__init__(n_var=self.n_assets, n_obj=1, xl=0.0, xu=1.0)
+        super().__init__(n_var=self.n_assets, n_obj=1, xl=0.0, xu=1.0, **kwargs)
 
     def _decode(self, x):
         return np.argsort(x)[::-1][:self.k]
@@ -61,7 +61,7 @@ class RiskBudgetingBRKGA(ElementwiseProblem):
         return np.sum(((rc / risk) - b)**2) * 1e6
 
 class MaximumSharpeBRKGA(ElementwiseProblem):
-    def __init__(self, retornos_medios, cov_matrix, rf, k_cardinality, solver_tol=1e-6, solver_maxiter=100):
+    def __init__(self, retornos_medios, cov_matrix, rf, k_cardinality, solver_tol=1e-6, solver_maxiter=100, **kwargs):
         self.ret_medios = retornos_medios
         self.cov_matrix = cov_matrix
         self.rf = rf
@@ -69,7 +69,7 @@ class MaximumSharpeBRKGA(ElementwiseProblem):
         self.solver_tol = solver_tol
         self.solver_maxiter = solver_maxiter
         self.n_assets = cov_matrix.shape[0]
-        super().__init__(n_var=self.n_assets, n_obj=1, xl=0.0, xu=1.0)
+        super().__init__(n_var=self.n_assets, n_obj=1, xl=0.0, xu=1.0, **kwargs)
 
     def _decode(self, x):
         return np.argsort(x)[::-1][:self.k]
@@ -101,13 +101,13 @@ class MaximumSharpeBRKGA(ElementwiseProblem):
         return - excess_ret / port_vol
 
 class MinimumVarianceBRKGA(ElementwiseProblem):
-    def __init__(self, cov_matrix, k_cardinality, solver_tol=1e-6, solver_maxiter=100):
+    def __init__(self, cov_matrix, k_cardinality, solver_tol=1e-6, solver_maxiter=100, **kwargs):
         self.cov_matrix = cov_matrix
         self.k = k_cardinality
         self.solver_tol = solver_tol
         self.solver_maxiter = solver_maxiter
         self.n_assets = cov_matrix.shape[0]
-        super().__init__(n_var=self.n_assets, n_obj=1, xl=0.0, xu=1.0)
+        super().__init__(n_var=self.n_assets, n_obj=1, xl=0.0, xu=1.0, **kwargs)
 
     def _decode(self, x):
         return np.argsort(x)[::-1][:self.k]
