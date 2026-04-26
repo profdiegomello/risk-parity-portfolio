@@ -1,0 +1,8 @@
+# Arquivos compilados do Python
+*.pyc
+*.pyo
+*.pyd
+
+# Diretórios de cache do Python
+__pycache__/
+.pytest_cache/
