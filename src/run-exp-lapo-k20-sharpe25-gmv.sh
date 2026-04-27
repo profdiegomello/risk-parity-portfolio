@@ -55,8 +55,6 @@ python3 experiment_runner.py \
     --workers          $WORKERS \
     --seed             $SEED \
     --verbose
-
-
     
 echo
 echo '======================================================================'
