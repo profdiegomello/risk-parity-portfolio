@@ -5,55 +5,70 @@ import os
 import multiprocessing
 from multiprocessing.pool import ThreadPool
 import time 
+import warnings
 from scipy.optimize import minimize
 from pymoo.optimize import minimize as pymoo_minimize
 from pymoo.algorithms.soo.nonconvex.brkga import BRKGA
 from models import RiskBudgetingBRKGA, MaximumSharpeBRKGA, MinimumVarianceBRKGA, naive_1_k_allocation
 import metrics
 
+warnings.filterwarnings("ignore", message="Values in x were outside bounds during a minimize step, clipping to bounds")
+
 def run_backtest(args):
     start_total = time.time()
     
     print(f"[INFO] Carregando dados: {args.input}")
     df_retornos = pd.read_csv(args.input, index_col=0, parse_dates=True)
-    df_retornos = df_retornos.dropna(how='all')
+    
+    df_retornos = df_retornos.dropna(axis=0, how='all')
+    df_retornos = df_retornos.dropna(axis=1, how='any')
     
     rf_col = 'RISKFREE' if 'RISKFREE' in df_retornos.columns else 'CDI'
     if rf_col not in df_retornos.columns:
-        raise ValueError("O dataset deve conter uma coluna 'RISKFREE' ou 'CDI'.")
+        raise ValueError("O dataset deve conter uma coluna 'RISKFREE' ou 'CDI' sem valores NA.")
 
     universo_ativos_bruto = [c for c in df_retornos.columns if c != rf_col]
 
-    # =========================================================================
-    # DEFINIÇÃO DO UNIVERSO RESTRITO ESTÁTICO (FILTRO SHARPE GLOBAL)
-    # =========================================================================
+    vols_totais = df_retornos[universo_ativos_bruto].std()
+    ativos_negociados = vols_totais[vols_totais > 1e-6].index.tolist()
+    df_retornos = df_retornos[ativos_negociados + [rf_col]]
+
+    id_exp = f"{args.strategy}_K{args.k}_Q{int(args.quartile_filter*100)}"
+    if args.output_dir:
+        os.makedirs(args.output_dir, exist_ok=True)
+
     in_sample_global = df_retornos.iloc[0 : args.train_window]
-    vols_global = in_sample_global[universo_ativos_bruto].std()
-    ativos_validos_global = vols_global[vols_global > 1e-6].index.tolist()
-
-    in_sample_global_f = in_sample_global[ativos_validos_global + [rf_col]]
+    
+    in_sample_global_f = in_sample_global[ativos_negociados + [rf_col]]
     rf_dinamico_global = in_sample_global_f[rf_col].mean()
-    ret_medios_global = in_sample_global_f[ativos_validos_global].mean().values
-    cov_matrix_global = in_sample_global_f[ativos_validos_global].cov().values
+    ret_medios_global = in_sample_global_f[ativos_negociados].mean().values
+    cov_matrix_global = in_sample_global_f[ativos_negociados].cov().values
 
-    volatilidade_global = np.sqrt(np.diag(cov_matrix_global))
-    sharpes_hist_global = np.where(volatilidade_global > 0, (ret_medios_global - rf_dinamico_global) / volatilidade_global, -np.inf)
+    sharpes_hist_global = metrics.calcular_vetor_sharpe(ret_medios_global, cov_matrix_global, rf_dinamico_global)
     percentil_corte_global = np.quantile(sharpes_hist_global, 1.0 - args.quartile_filter)
     
     indices_restritos = np.where(sharpes_hist_global >= percentil_corte_global)[0]
-    universo_restrito = [ativos_validos_global[i] for i in indices_restritos]
+    universo_restrito = [ativos_negociados[i] for i in indices_restritos]
+    sharpes_restritos = sharpes_hist_global[indices_restritos]
+    
+    tickers_formatados = [f"{ativo} ({sharpe:.4f})" for ativo, sharpe in zip(universo_restrito, sharpes_restritos)]
     
     print(f"============================================================")
     print(f"FILTRO GLOBAL ESTÁTICO (Top {int(args.quartile_filter*100)}% Sharpe)")
-    print(f"Ativos Brutos: {len(universo_ativos_bruto)} | Ativos no Universo Restrito: {len(universo_restrito)}")
+    print(f"Ativos Brutos Iniciais: {len(universo_ativos_bruto)}")
+    print(f"Ativos 100% Negociados e sem NAs: {len(ativos_negociados)}")
+    print(f"Ativos no Universo Restrito (Instância): {len(universo_restrito)}")
+    print(f"TICKERS (Sharpe Diário):\n{', '.join(tickers_formatados)}")
     print(f"============================================================\n")
 
-    # Redução da instância para o universo restrito
     df_retornos = df_retornos[universo_restrito + [rf_col]]
     universo_ativos = universo_restrito
 
-    # =========================================================================
-    
+    if args.output_dir:
+        caminho_subset = os.path.join(args.output_dir, f"subset_{id_exp}.csv")
+        df_retornos.to_csv(caminho_subset)
+        print(f"[INFO] Subset estático exportado para: {caminho_subset}\n")
+
     pesos_historicos = np.zeros(len(universo_ativos)) 
     portfolio_out_of_sample = []
     datas_oos_globais = []
@@ -71,10 +86,6 @@ def run_backtest(args):
     passo_teste = args.test_window
     tamanho_treino = args.train_window
 
-    id_exp = f"{args.strategy}_K{args.k}_Q{int(args.quartile_filter*100)}"
-    if args.output_dir:
-        os.makedirs(args.output_dir, exist_ok=True)
-
     for idx_atual in range(tamanho_treino, total_dias, passo_teste):
         start_rebal = time.time()
         
@@ -85,14 +96,7 @@ def run_backtest(args):
 
         data_rebalanceamento = out_sample.index[0]
         
-        # Filtro exclusivo de sobrevivência (evitar variância zero na matriz de covariância)
-        vols_in = in_sample[universo_ativos].std()
-        ativos_validos = vols_in[vols_in > 1e-6].index.intersection(out_sample.columns).tolist()
-        
-        if len(ativos_validos) < args.k:
-            print(f"[AVISO] Ativos válidos ({len(ativos_validos)}) insuficientes para K={args.k} na data {data_rebalanceamento.date()}. Pulando...")
-            continue
-
+        ativos_validos = universo_ativos 
         out_sample = out_sample[ativos_validos]
         
         in_sample_f = in_sample[ativos_validos + [rf_col]]
@@ -102,7 +106,6 @@ def run_backtest(args):
             
         pesos_novos_janela = np.zeros(len(ativos_validos))
         
-        # Etapa de Otimização operando sobre o subset estrito validado
         if args.strategy == 'naive':
             top_k, p_naive = naive_1_k_allocation(ret_medios, cov_matrix, rf_dinamico, args.k)
             pesos_novos_janela[top_k] = p_naive[top_k]

@@ -1,6 +1,7 @@
 import numpy as np
 from scipy.optimize import minimize, differential_evolution
 from pymoo.core.problem import ElementwiseProblem
+import metrics 
 
 class RiskBudgetingBRKGA(ElementwiseProblem):
     def __init__(self, cov_matrix, k_cardinality, formulation='convex', solver_method='SLSQP', 
@@ -130,8 +131,7 @@ class MinimumVarianceBRKGA(ElementwiseProblem):
         return w.T @ cov @ w
 
 def naive_1_k_allocation(retornos_medios, cov_matrix, rf, k_cardinality):
-    volatilidades = np.sqrt(np.diag(cov_matrix))
-    sharpes = np.where(volatilidades > 0, (retornos_medios - rf) / volatilidades, -np.inf)
+    sharpes = metrics.calcular_vetor_sharpe(retornos_medios, cov_matrix, rf)
     top_k_indices = np.argsort(sharpes)[::-1][:k_cardinality]
     pesos = np.zeros(len(retornos_medios))
     pesos[top_k_indices] = 1.0 / k_cardinality
