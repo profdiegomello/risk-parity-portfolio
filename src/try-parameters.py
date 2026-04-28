@@ -16,7 +16,7 @@ def try_parameters():
     parser.add_argument('--input', type=str, required=True)
     parser.add_argument('--output_dir', type=str, default='./param_tests')
     parser.add_argument('--train_window', type=int, default=252)
-    parser.add_argument('--test_days', type=int, default=5, help="Numero de dias consecutivos para testar a partir do inicio")
+    parser.add_argument('--test_days', type=int, default=5, help="Numero de dias consecutivos para testar")
     parser.add_argument('--k', type=int, default=10)
     parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--verbose', action='store_true')
@@ -44,7 +44,7 @@ def try_parameters():
         args.gen_list
     ))
 
-    print(f"[INFO] Iniciando exploração: {len(param_combinations)} combinações de parâmetros.")
+    print(f"[INFO] Iniciando exploração: {len(param_combinations)} combinações de parâmetros por dia.")
     print(f"[INFO] O teste ocorrerá por {args.test_days} dia(s) consecutivo(s).")
 
     dias_testados = 0
@@ -65,8 +65,6 @@ def try_parameters():
         cov_matrix = in_sample[universo_ativos].cov().values
 
         print(f"\n[================ Dia: {data_ref} ({dias_testados + 1}/{args.test_days}) ================]")
-        
-        daily_results_log = []
 
         for elite, offspring, mutant, gen in param_combinations:
             start_comb = time.time()
@@ -94,14 +92,12 @@ def try_parameters():
             row_result['n_gen'] = gen
             row_result['Time_Sec'] = time.time() - start_comb
 
-            daily_results_log.append(row_result)
+            # Gravação imediata linha a linha na planilha única
+            df_row = pd.DataFrame([row_result])
+            df_row.to_csv(caminho_arquivo, mode='a', header=not os.path.exists(caminho_arquivo), index=False)
 
             if not args.verbose:
-                print(f"[*] E:{elite} O:{offspring} M:{mutant} G:{gen} | Done.")
-
-        df_daily = pd.DataFrame(daily_results_log)
-        df_daily.to_csv(caminho_arquivo, mode='a', header=not os.path.exists(caminho_arquivo), index=False)
-        print(f"[SUCESSO] Resultados do dia acrescentados em: {caminho_arquivo}")
+                print(f"[*] E:{elite} O:{offspring} M:{mutant} G:{gen} | Registrado no CSV.")
 
         dias_testados += 1
 
