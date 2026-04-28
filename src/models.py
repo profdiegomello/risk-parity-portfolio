@@ -3,6 +3,36 @@ from scipy.optimize import minimize, differential_evolution
 from pymoo.core.problem import ElementwiseProblem
 import metrics 
 
+
+def _normalized_weights_or_none(weights):
+    if weights is None:
+        return None
+
+    weights = np.asarray(weights, dtype=float)
+    if not np.all(np.isfinite(weights)):
+        return None
+
+    soma = np.sum(weights)
+    if soma <= 1e-10:
+        return None
+
+    pesos = weights / soma
+    if not np.all(np.isfinite(pesos)):
+        return None
+
+    return pesos
+
+
+def _valid_solution_or_none(res, enforce_success=False):
+    if res is None:
+        return None
+
+    if enforce_success and not getattr(res, "success", False):
+        return None
+
+    return _normalized_weights_or_none(getattr(res, "x", None))
+
+
 class RiskBudgetingBRKGA(ElementwiseProblem):
     def __init__(self, cov_matrix, k_cardinality, formulation='convex', solver_method='SLSQP', 
                  solver_tol=1e-6, solver_maxiter=100, seed=42, **kwargs):
@@ -30,7 +60,10 @@ class RiskBudgetingBRKGA(ElementwiseProblem):
             res = minimize(self._obj_convex, y0, args=(sub_cov, self.b_target), 
                            method=self.solver_method, bounds=bounds, 
                            tol=self.solver_tol, options={'maxiter': self.solver_maxiter})
-            pesos = res.x / np.sum(res.x)
+            pesos = _valid_solution_or_none(res, enforce_success=True)
+            if pesos is None:
+                out["F"] = float('inf')
+                return
             out["F"] = np.sqrt(pesos.T @ sub_cov @ pesos)
         else:
             bounds = tuple((0.0, 1.0) for _ in range(self.k))
@@ -40,13 +73,19 @@ class RiskBudgetingBRKGA(ElementwiseProblem):
                 res = minimize(self._obj_non_convex, x0, args=(sub_cov, self.b_target), 
                                method='SLSQP', bounds=bounds, constraints=constraints, 
                                tol=self.solver_tol, options={'maxiter': self.solver_maxiter})
-                wn = res.x / np.sum(res.x)
+                wn = _valid_solution_or_none(res, enforce_success=True)
+                if wn is None:
+                    out["F"] = float('inf')
+                    return
                 out["F"] = np.sqrt(wn.T @ sub_cov @ wn)
             else:
                 res = differential_evolution(self._obj_non_convex, bounds, args=(sub_cov, self.b_target), 
                                              tol=self.solver_tol, maxiter=self.solver_maxiter, 
                                              popsize=5, seed=self.seed)
-                wn = res.x / np.sum(res.x)
+                wn = _valid_solution_or_none(res, enforce_success=True)
+                if wn is None:
+                    out["F"] = float('inf')
+                    return
                 out["F"] = np.sqrt(wn.T @ sub_cov @ wn)
 
     def _obj_convex(self, y, cov, b):
@@ -87,19 +126,24 @@ class MaximumSharpeBRKGA(ElementwiseProblem):
         res = minimize(self._neg_sharpe, x0, args=(sub_ret, sub_cov, self.rf), 
                        method='SLSQP', bounds=bounds, constraints=constraints, 
                        tol=self.solver_tol, options={'maxiter': self.solver_maxiter})
-        
+
+        if not getattr(res, "success", False) or not np.isfinite(getattr(res, "fun", np.inf)):
+            out["F"] = float('inf')
+            return
+
         out["F"] = res.fun 
 
     def _neg_sharpe(self, w, ret, cov, rf):
         port_ret = np.dot(w, ret)
         port_vol = np.sqrt(w.T @ cov @ w)
         if port_vol <= 1e-10: return float('inf')
-        
+
         excess_ret = port_ret - rf
-        if excess_ret <= 0:
-            return 1e10
-            
-        return - excess_ret / port_vol
+        sharpe = excess_ret / port_vol
+        if not np.isfinite(sharpe):
+            return float('inf')
+
+        return - sharpe
 
 class MinimumVarianceBRKGA(ElementwiseProblem):
     def __init__(self, cov_matrix, k_cardinality, solver_tol=1e-6, solver_maxiter=100, **kwargs):
@@ -124,7 +168,11 @@ class MinimumVarianceBRKGA(ElementwiseProblem):
         res = minimize(self._obj_variance, x0, args=(sub_cov,), 
                        method='SLSQP', bounds=bounds, constraints=constraints, 
                        tol=self.solver_tol, options={'maxiter': self.solver_maxiter})
-        
+
+        if not getattr(res, "success", False) or not np.isfinite(getattr(res, "fun", np.inf)):
+            out["F"] = float('inf')
+            return
+
         out["F"] = res.fun 
 
     def _obj_variance(self, w, cov):

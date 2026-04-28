@@ -13,11 +13,11 @@ SEED=1360
 TIMESTAMP=$(date +"%Y-%m-%d-%H-%M-%S")
 
 # Input/output parameters
-INPUT_FILE=../dat/dataset-2.csv
-OUTPUT_FOLDER="./LAPO-K-10-Sharpe-25"
+INPUT_FILE=../dat/dataset-3.csv
+OUTPUT_FOLDER="./LAPO-K-10-Sharpe-25-Dataset-3"
 
 # Portfolio parameters
-TRANSACTION_COST=0.005
+TRANSACTION_COST=0.0
 K=10
 QUARTILE=0.25
 
