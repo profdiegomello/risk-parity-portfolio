@@ -12,6 +12,11 @@
 SEED=1360
 TIMESTAMP=$(date +"%Y-%m-%d-%H-%M-%S")
 
+# Data treatment
+OUTLIER_METHOD="winsor"
+WINSOR_LIMITS=0.01
+IQR_MULT=3.0 
+
 # Input/output parameters
 INPUT_FILE=../dat/dataset-3.csv
 OUTPUT_FOLDER="./LAPO-K-10-Sharpe-25-Dataset-3"
@@ -49,6 +54,9 @@ python3 experiment_runner.py \
     --test_window      $TEST_WINDOW \
     --quartile_filter  $QUARTILE \
     --transaction_cost $TRANSACTION_COST \
+    --outlier_method   $OUTLIER_METHOD \
+    --winsor_limits    $WINSOR_LIMITS \
+    --iqr_multiplier   $IQR_MULT \
     --n_elites         $ELITE \
     --n_offsprings     $OFFSPRING \
     --n_mutants        $MUTANTS \
