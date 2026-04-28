@@ -18,20 +18,28 @@ def annualized_return(returns_series, periods_per_year=252):
 def annualized_volatility(returns_series, periods_per_year=252):
     return returns_series.std() * np.sqrt(periods_per_year)
 
-def sharpe_ratio(returns_series, risk_free_rate_annual=0.0, periods_per_year=252):
-    ann_ret = annualized_return(returns_series, periods_per_year)
-    ann_vol = annualized_volatility(returns_series, periods_per_year)
-    if ann_vol < 1e-6:
+def sharpe_ratio(returns_series, rf_series, periods_per_year=252):
+    excess_returns = returns_series - rf_series
+    std_excess = excess_returns.std()
+    
+    if std_excess < 1e-6:
         return 0.0
-    return (ann_ret - risk_free_rate_annual) / ann_vol
+        
+    return (excess_returns.mean() / std_excess) * np.sqrt(periods_per_year)
 
-def sortino_ratio(returns_series, risk_free_rate_annual=0.0, periods_per_year=252):
-    ann_ret = annualized_return(returns_series, periods_per_year)
-    negative_returns = returns_series[returns_series < 0]
-    downside_vol = negative_returns.std() * np.sqrt(periods_per_year) if len(negative_returns) > 0 else 0.0
-    if downside_vol < 1e-6:
+def sortino_ratio(returns_series, rf_series, periods_per_year=252):
+    excess_returns = returns_series - rf_series
+    downside_diff = excess_returns[excess_returns < 0]
+    
+    if len(downside_diff) == 0:
         return 0.0
-    return (ann_ret - risk_free_rate_annual) / downside_vol
+        
+    downside_deviation = np.sqrt(np.mean(downside_diff**2))
+    
+    if downside_deviation < 1e-6:
+        return 0.0
+        
+    return (excess_returns.mean() / downside_deviation) * np.sqrt(periods_per_year)
 
 def maximum_drawdown(returns_series):
     cumulative_returns = (1 + returns_series).cumprod()

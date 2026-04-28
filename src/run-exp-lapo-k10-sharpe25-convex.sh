@@ -8,7 +8,8 @@
 #############################################
 
 # Miscellaneous
-SEED=$RANDOM
+#SEED=$RANDOM
+SEED=1360
 TIMESTAMP=$(date +"%Y-%m-%d-%H-%M-%S")
 
 # Input/output parameters
@@ -26,9 +27,9 @@ TRAIN_WINDOW=252
 
 # BRKGA parameters
 GENERATIONS=150
-ELITE=5
-OFFSPRING=20
-MUTANTS=5
+ELITE=10
+OFFSPRING=40
+MUTANTS=10
 PROB_BIAS=0.7
 WORKERS=8
 

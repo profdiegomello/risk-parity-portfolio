@@ -12,6 +12,7 @@ from pymoo.algorithms.soo.nonconvex.brkga import BRKGA
 from models import RiskBudgetingBRKGA, MaximumSharpeBRKGA, MinimumVarianceBRKGA, naive_1_k_allocation
 import metrics
 
+# Supressão do aviso numérico do SLSQP
 warnings.filterwarnings("ignore", message="Values in x were outside bounds during a minimize step, clipping to bounds")
 
 def run_backtest(args):
@@ -20,6 +21,7 @@ def run_backtest(args):
     print(f"[INFO] Carregando dados: {args.input}")
     df_retornos = pd.read_csv(args.input, index_col=0, parse_dates=True)
     
+    # 1. Tratamento de Dados (Higiene Inicial)
     df_retornos = df_retornos.dropna(axis=0, how='all')
     df_retornos = df_retornos.dropna(axis=1, how='any')
     
@@ -29,6 +31,7 @@ def run_backtest(args):
 
     universo_ativos_bruto = [c for c in df_retornos.columns if c != rf_col]
 
+    # 2. Filtro de Liquidez/Baixa Volatilidade
     vols_totais = df_retornos[universo_ativos_bruto].std()
     ativos_negociados = vols_totais[vols_totais > 1e-6].index.tolist()
     df_retornos = df_retornos[ativos_negociados + [rf_col]]
@@ -37,6 +40,7 @@ def run_backtest(args):
     if args.output_dir:
         os.makedirs(args.output_dir, exist_ok=True)
 
+    # 3. DEFINIÇÃO DO UNIVERSO RESTRITO ESTÁTICO (FILTRO SHARPE GLOBAL)
     in_sample_global = df_retornos.iloc[0 : args.train_window]
     
     in_sample_global_f = in_sample_global[ativos_negociados + [rf_col]]
@@ -57,10 +61,11 @@ def run_backtest(args):
     print(f"FILTRO GLOBAL ESTÁTICO (Top {int(args.quartile_filter*100)}% Sharpe)")
     print(f"Ativos Brutos Iniciais: {len(universo_ativos_bruto)}")
     print(f"Ativos 100% Negociados e sem NAs: {len(ativos_negociados)}")
-    print(f"Ativos no Universo Restrito (Instância): {len(universo_restrito)}")
+    print(f"Ativos no Universo Restrito (Instância N): {len(universo_restrito)}")
     print(f"TICKERS (Sharpe Diário):\n{', '.join(tickers_formatados)}")
     print(f"============================================================\n")
 
+    # Aplicação do universo restrito em toda a base para o backtest
     df_retornos = df_retornos[universo_restrito + [rf_col]]
     universo_ativos = universo_restrito
 
@@ -86,6 +91,7 @@ def run_backtest(args):
     passo_teste = args.test_window
     tamanho_treino = args.train_window
 
+    # 4. LAÇO DO BACKTEST (JANELAS MÓVEIS)
     for idx_atual in range(tamanho_treino, total_dias, passo_teste):
         start_rebal = time.time()
         
@@ -153,13 +159,16 @@ def run_backtest(args):
         tempo_janela = time.time() - start_rebal
         log_tempos_rebalanceamento.append({'Data': data_rebalanceamento, 'Tempo_Segundos': tempo_janela})
 
+        # Alocação dos pesos no vetor global
         pesos_novos_global = np.zeros(len(universo_ativos))
         for idx_local, ativo in enumerate(ativos_validos):
             pesos_novos_global[universo_ativos.index(ativo)] = pesos_novos_janela[idx_local]
 
+        # Cálculo do Custo de Transação
         turnover = metrics.calculate_turnover(pesos_historicos, pesos_novos_global)
         custo_rebal = turnover * args.transaction_cost
         
+        # Propagação Diária na Janela Out-of-Sample
         peso_corrente = pesos_novos_global.copy()
         for i_dia, data_dia in enumerate(out_sample.index):
             log_pesos_diarios.append({'Data': data_dia, **{a: peso_corrente[i] for i, a in enumerate(universo_ativos)}})
@@ -197,17 +206,20 @@ def run_backtest(args):
         pool.close()
         pool.join()
 
+    # 5. CÁLCULO DAS MÉTRICAS FINAIS (CORREÇÃO DE RF APLICADA AQUI)
     total_exec = time.time() - start_total
     ts_final = pd.Series(portfolio_out_of_sample, index=datas_oos_globais)
-    rf_anual = df_retornos[rf_col].mean() * 252
+    
+    # Extração pontual da série temporal dinâmica da taxa livre de risco (Out-of-Sample)
+    rf_oos = df_retornos.loc[datas_oos_globais, rf_col]
     
     if args.output_dir:
         df_res = pd.DataFrame({
             'Estrategia': [args.strategy], 'K': [args.k], 'Quartil': [args.quartile_filter],
             'Retorno_Anual': [metrics.annualized_return(ts_final)],
             'Vol_Anual': [metrics.annualized_volatility(ts_final)],
-            'Sharpe': [metrics.sharpe_ratio(ts_final, rf_anual)], 
-            'Sortino': [metrics.sortino_ratio(ts_final, rf_anual)], 
+            'Sharpe': [metrics.sharpe_ratio(ts_final, rf_oos)], 
+            'Sortino': [metrics.sortino_ratio(ts_final, rf_oos)], 
             'MDD': [metrics.maximum_drawdown(ts_final)],
             'Tempo_Total_Seg': [total_exec]
         })
@@ -218,7 +230,7 @@ def run_backtest(args):
         pd.DataFrame(log_custos_diarios).to_csv(os.path.join(args.output_dir, f"costs_daily_{id_exp}.csv"), index=False)
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Backtest Solver - SBPO 2026')
+    parser = argparse.ArgumentParser(description='Backtest Solver - Otimização de Portfólios via BRKGA')
     parser.add_argument('--input', type=str, required=True)
     parser.add_argument('--strategy', type=str, required=True, choices=['rp_convex', 'rp_nonconvex', 'msr', 'gmv', 'naive'])
     parser.add_argument('--solver', type=str, default='SLSQP')
