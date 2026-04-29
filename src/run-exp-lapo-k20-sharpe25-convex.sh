@@ -18,7 +18,7 @@ IQR_MULT=3.0
 
 # Input/output parameters
 INPUT_FILE=../dat/dataset-3.csv
-OUTPUT_FOLDER="./LAPO-K-20-Sharpe-25"
+OUTPUT_FOLDER="./LAPO-K-20-Sharpe-25-Dataset-3"
 
 # Portfolio parameters
 TRANSACTION_COST=0.0
