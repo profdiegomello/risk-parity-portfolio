@@ -37,7 +37,6 @@ MUTANTS=10
 PROB_BIAS=0.7
 WORKERS=8
 
-
 #############################################
 #
 # Non-Convex
@@ -53,9 +52,9 @@ python3 experiment_runner.py \
     --test_window      $TEST_WINDOW \
     --quartile_filter  $QUARTILE \
     --transaction_cost $TRANSACTION_COST \
+    --outlier_method   $OUTLIER_METHOD \
     --winsor_limits    $WINSOR_LIMITS \
     --iqr_multiplier   $IQR_MULT \
-    --n_elites         $ELITE \
     --n_elites         $ELITE \
     --n_offsprings     $OFFSPRING \
     --n_mutants        $MUTANTS \
