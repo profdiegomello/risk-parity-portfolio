@@ -195,26 +195,110 @@ def run_backtest(args):
     log_sanitizacao = []
     log_otimizacao = []
 
+    total_dias = len(df_retornos)
+    tamanho_treino = args.train_window
+    start_idx = tamanho_treino
+
+    # ---------------------------------------------------------
+    # WARMSTART LOGIC (Abordagem Mista)
+    # ---------------------------------------------------------
+    if args.warmstart:
+        ts_file = os.path.join(args.output_dir, f"oos_ts_{id_exp}.csv")
+        pesos_file = os.path.join(args.output_dir, f"pesos_diarios_{id_exp}.csv")
+        
+        if os.path.exists(ts_file):
+            print(f"[INFO] Warmstart ativado. Lendo serie historica de {id_exp}...")
+            try:
+                df_ts = pd.read_csv(ts_file, index_col=0, parse_dates=True)
+                last_date = df_ts.index[-1]
+                last_idx_loc = df_retornos.index.get_loc(last_date)
+                
+                # Tratar possiveis multiplicidades de indice
+                if isinstance(last_idx_loc, slice) or isinstance(last_idx_loc, np.ndarray):
+                    last_idx = np.where(last_idx_loc)[0][-1]
+                else:
+                    last_idx = last_idx_loc
+                    
+                start_idx = last_idx + 1
+                
+                if start_idx < total_dias:
+                    # Restaurar series mestras do loop
+                    portfolio_oos_bruto = df_ts['Retorno_Bruto'].tolist()
+                    portfolio_oos_liquido = df_ts['Retorno_Liquido'].tolist()
+                    datas_oos_globais = df_ts.index.tolist()
+                    
+                    # Logica Mista para Pesos Diarios
+                    if os.path.exists(pesos_file):
+                        try:
+                            df_pesos = pd.read_csv(pesos_file, index_col=0, parse_dates=True)
+                            last_pesos = df_pesos.iloc[-1][universo_ativos].values
+                            last_ret = df_retornos.iloc[last_idx][universo_ativos].values
+                            
+                            # Recalcular drift para a retomada do dia seguinte
+                            w_drift = last_pesos * (1 + last_ret)
+                            soma_w = np.sum(w_drift)
+                            if soma_w > 1e-10:
+                                w_drift /= soma_w
+                            pesos_historicos = w_drift
+                            
+                            # Restaurar a lista inteira na RAM para nao perder os dados antigos no CSV
+                            df_pesos_reset = df_pesos.reset_index()
+                            # Renomeia se houver desalinhamento no nome do index
+                            if df_pesos_reset.columns[0] != 'Data':
+                                df_pesos_reset.rename(columns={df_pesos_reset.columns[0]: 'Data'}, inplace=True)
+                            log_pesos_diarios = df_pesos_reset.to_dict('records')
+                            
+                            print(f"[OK] Pesos reconstruidos do dia {last_date.date()}. Turnover estara intacto.")
+                        except Exception as e:
+                            print(f"[WARN] Erro ao carregar arquivo de pesos: {e}.")
+                            print("[WARN] Assumindo pesos iniciais zerados (hiccup de transacao previsto).")
+                            pesos_historicos = np.zeros(len(universo_ativos))
+                    else:
+                        print("[INFO] Arquivo de pesos nao encontrado na pasta.")
+                        print("[INFO] Assumindo pesos iniciais zerados para retomada (hiccup de transacao previsto).")
+                        pesos_historicos = np.zeros(len(universo_ativos))
+                        
+                    # Restaurar arquivos menores de log (se existirem) para o modo 'append' na RAM
+                    def restore_log(filename):
+                        path = os.path.join(args.output_dir, filename)
+                        if os.path.exists(path):
+                            return pd.read_csv(path).to_dict('records')
+                        return []
+
+                    log_tempos_rebalanceamento = restore_log(f"exec_times_{id_exp}.csv")
+                    log_custos_diarios = restore_log(f"costs_daily_{id_exp}.csv")
+                    log_universos_dinamicos = restore_log(f"universos_dinamicos_{id_exp}.csv")
+                    log_sanitizacao = restore_log(f"sanitizacao_{id_exp}.csv")
+                    log_otimizacao = restore_log(f"otimizacao_{id_exp}.csv")
+                    
+                    print(f"[OK] Ultima data processada validada: {last_date.date()}. Retomando na data {df_retornos.index[start_idx].date()}.")
+                else:
+                    print(f"[INFO] O backtest ja atingiu a ultima data disponivel para {id_exp}.")
+            except Exception as e:
+                print(f"[WARN] Falha geral no warmstart ({e}). Iniciando experimento do zero (indice {tamanho_treino}).")
+                start_idx = tamanho_treino
+        else:
+            print(f"[INFO] Serie historica oos_ts_{id_exp}.csv nao encontrada. Iniciando experimento do zero.")
+
+
     n_cores = args.workers if args.workers > 0 else multiprocessing.cpu_count()
     pool = ThreadPool(n_cores) if n_cores > 1 else None
     problem_kwargs = {}
     if pool:
         problem_kwargs["runner"] = pool.starmap
 
-    total_dias = len(df_retornos)
-    tamanho_treino = args.train_window
-
     print("============================================================")
     print(f"BACKTEST COM FILTRO DINAMICO (Top {int(args.quartile_filter * 100)}% Sharpe)")
     print(f"Ativos Brutos Iniciais: {len(universo_ativos_bruto)}")
     print(f"Ativos 100% Negociados e sem NAs: {len(ativos_negociados)}")
     print(f"Janela de Treino: {tamanho_treino} dias")
+    print(f"Indice de Inicio/Retomada: {start_idx} (Total de Dias: {total_dias})")
     print("Aplicacao: t+1")
     print("Rebalanceamento: diario")
     print("============================================================\n")
 
     # 3. Backtest rolling diario: estima em t e aplica em t+1.
-    for idx_atual in range(tamanho_treino, total_dias):
+    for idx_atual in range(start_idx, total_dias):
         start_rebal = time.time()
 
         in_sample = df_retornos.iloc[idx_atual - tamanho_treino : idx_atual]
@@ -371,6 +455,8 @@ def run_backtest(args):
             pesos_novos_janela[indices_sel] = w_final
 
         tempo_janela = time.time() - start_rebal
+        
+        # LOGGING EM MEMORIA (Sera salvo logo abaixo)
         log_tempos_rebalanceamento.append(
             {
                 "Data_Rebalanceamento": data_rebalanceamento,
@@ -447,19 +533,36 @@ def run_backtest(args):
             f"| Tempo: {tempo_janela:.2f}s"
         )
 
+        # ---------------------------------------------------------
+        # SALVAMENTO INCREMENTAL NO DISCO
+        # ---------------------------------------------------------
         if args.output_dir:
             pd.DataFrame(
                 {
                     "Retorno_Bruto": portfolio_oos_bruto,
                     "Retorno_Liquido": portfolio_oos_liquido,
-                    # Mantido por compatibilidade com scripts antigos.
-                    "Retorno": portfolio_oos_liquido,
+                    "Retorno": portfolio_oos_liquido, # Compatibilidade
                 },
                 index=datas_oos_globais,
             ).to_csv(os.path.join(args.output_dir, f"oos_ts_{id_exp}.csv"))
+            
             pd.DataFrame(log_tempos_rebalanceamento).to_csv(
-                os.path.join(args.output_dir, f"exec_times_{id_exp}.csv"),
-                index=False,
+                os.path.join(args.output_dir, f"exec_times_{id_exp}.csv"), index=False
+            )
+            pd.DataFrame(log_pesos_diarios).set_index("Data").to_csv(
+                os.path.join(args.output_dir, f"pesos_diarios_{id_exp}.csv")
+            )
+            pd.DataFrame(log_custos_diarios).to_csv(
+                os.path.join(args.output_dir, f"costs_daily_{id_exp}.csv"), index=False
+            )
+            pd.DataFrame(log_universos_dinamicos).to_csv(
+                os.path.join(args.output_dir, f"universos_dinamicos_{id_exp}.csv"), index=False
+            )
+            pd.DataFrame(log_sanitizacao).to_csv(
+                os.path.join(args.output_dir, f"sanitizacao_{id_exp}.csv"), index=False
+            )
+            pd.DataFrame(log_otimizacao).to_csv(
+                os.path.join(args.output_dir, f"otimizacao_{id_exp}.csv"), index=False
             )
 
     if pool:
@@ -467,52 +570,35 @@ def run_backtest(args):
         pool.join()
 
     # 4. Calculo das metricas finais.
+    # O bloco de metricas so executa ao finalizar o loop completo do dataset
     total_exec = time.time() - start_total
-    ts_bruto = pd.Series(portfolio_oos_bruto, index=datas_oos_globais)
-    ts_liquido = pd.Series(portfolio_oos_liquido, index=datas_oos_globais)
-    rf_oos = df_retornos.loc[datas_oos_globais, rf_col]
+    
+    if len(datas_oos_globais) > 0:
+        ts_bruto = pd.Series(portfolio_oos_bruto, index=datas_oos_globais)
+        ts_liquido = pd.Series(portfolio_oos_liquido, index=datas_oos_globais)
+        rf_oos = df_retornos.loc[datas_oos_globais, rf_col]
 
-    if args.output_dir:
-        df_res = pd.DataFrame(
-            {
-                "Estrategia": [args.strategy],
-                "K": [args.k],
-                "Quartil": [args.quartile_filter],
-                "Retorno_Anual_Bruto": [metrics.annualized_return(ts_bruto)],
-                "Vol_Anual_Bruto": [metrics.annualized_volatility(ts_bruto)],
-                "Sharpe_Bruto": [metrics.sharpe_ratio(ts_bruto, rf_oos)],
-                "Sortino_Bruto": [metrics.sortino_ratio(ts_bruto, rf_oos)],
-                "MDD_Bruto": [metrics.maximum_drawdown(ts_bruto)],
-                "Retorno_Anual_Liquido": [metrics.annualized_return(ts_liquido)],
-                "Vol_Anual_Liquido": [metrics.annualized_volatility(ts_liquido)],
-                "Sharpe_Liquido": [metrics.sharpe_ratio(ts_liquido, rf_oos)],
-                "Sortino_Liquido": [metrics.sortino_ratio(ts_liquido, rf_oos)],
-                "MDD_Liquido": [metrics.maximum_drawdown(ts_liquido)],
-                "Tempo_Total_Seg": [total_exec],
-            }
-        )
-        master_path = os.path.join(args.output_dir, "resultados_mestre.csv")
-        df_res.to_csv(master_path, mode="a", header=not os.path.exists(master_path), index=False)
-
-        pd.DataFrame(log_pesos_diarios).set_index("Data").to_csv(
-            os.path.join(args.output_dir, f"pesos_diarios_{id_exp}.csv")
-        )
-        pd.DataFrame(log_custos_diarios).to_csv(
-            os.path.join(args.output_dir, f"costs_daily_{id_exp}.csv"),
-            index=False,
-        )
-        pd.DataFrame(log_universos_dinamicos).to_csv(
-            os.path.join(args.output_dir, f"universos_dinamicos_{id_exp}.csv"),
-            index=False,
-        )
-        pd.DataFrame(log_sanitizacao).to_csv(
-            os.path.join(args.output_dir, f"sanitizacao_{id_exp}.csv"),
-            index=False,
-        )
-        pd.DataFrame(log_otimizacao).to_csv(
-            os.path.join(args.output_dir, f"otimizacao_{id_exp}.csv"),
-            index=False,
-        )
+        if args.output_dir:
+            df_res = pd.DataFrame(
+                {
+                    "Estrategia": [args.strategy],
+                    "K": [args.k],
+                    "Quartil": [args.quartile_filter],
+                    "Retorno_Anual_Bruto": [metrics.annualized_return(ts_bruto)],
+                    "Vol_Anual_Bruto": [metrics.annualized_volatility(ts_bruto)],
+                    "Sharpe_Bruto": [metrics.sharpe_ratio(ts_bruto, rf_oos)],
+                    "Sortino_Bruto": [metrics.sortino_ratio(ts_bruto, rf_oos)],
+                    "MDD_Bruto": [metrics.maximum_drawdown(ts_bruto)],
+                    "Retorno_Anual_Liquido": [metrics.annualized_return(ts_liquido)],
+                    "Vol_Anual_Liquido": [metrics.annualized_volatility(ts_liquido)],
+                    "Sharpe_Liquido": [metrics.sharpe_ratio(ts_liquido, rf_oos)],
+                    "Sortino_Liquido": [metrics.sortino_ratio(ts_liquido, rf_oos)],
+                    "MDD_Liquido": [metrics.maximum_drawdown(ts_liquido)],
+                    "Tempo_Total_Seg": [total_exec],
+                }
+            )
+            master_path = os.path.join(args.output_dir, "resultados_mestre.csv")
+            df_res.to_csv(master_path, mode="a", header=not os.path.exists(master_path), index=False)
 
 
 if __name__ == "__main__":
@@ -530,7 +616,7 @@ if __name__ == "__main__":
     parser.add_argument("--train_window", type=int, default=252)
     parser.add_argument("--test_window", type=int, default=1)
     parser.add_argument("--quartile_filter", type=float, default=1.0)
-    parser.add_argument("--transaction_cost", type=float, default=0.005)
+    parser.add_argument("--transaction_cost", type=float, default=0.0)
     parser.add_argument("--outlier_method", type=str, default="winsor", choices=["winsor", "iqr"])
     parser.add_argument("--winsor_limits", type=float, default=0.01)
     parser.add_argument("--iqr_multiplier", type=float, default=3.0)
@@ -542,5 +628,6 @@ if __name__ == "__main__":
     parser.add_argument("--n_mutants", type=int, default=10)
     parser.add_argument("--bias", type=float, default=0.7)
     parser.add_argument("--verbose", action="store_true")
+    parser.add_argument("--warmstart", action="store_true", help="Recupera logs para continuar de onde parou.")
 
     run_backtest(parser.parse_args())
