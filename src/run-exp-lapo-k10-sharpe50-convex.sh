@@ -12,11 +12,11 @@ SEED=$RANDOM
 TIMESTAMP=$(date +"%Y-%m-%d-%H-%M-%S")
 
 # Input/output parameters
-INPUT_FILE=../dat/dataset-2.csv
-OUTPUT_FOLDER="./LAPO-K-10-Sharpe-50"
+INPUT_FILE=../dat/dataset-3.csv
+OUTPUT_FOLDER="./LAPO-K-10-Sharpe-50-Dataset-3"
 
 # Portfolio parameters
-TRANSACTION_COST=0.005
+TRANSACTION_COST=0.0
 K=10
 QUARTILE=0.50
 
@@ -26,9 +26,9 @@ TRAIN_WINDOW=252
 
 # BRKGA parameters
 GENERATIONS=150
-ELITE=5
-OFFSPRING=20
-MUTANTS=5
+ELITE=10
+OFFSPRING=40
+MUTANTS=10
 PROB_BIAS=0.7
 WORKERS=8
 
