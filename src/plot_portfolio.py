@@ -51,7 +51,7 @@ def write_validation_report(output_dir, filename, linhas):
     print(f"[INFO] Relatorio de validacao salvo em: {caminho}")
 
 
-def plot_wealth_index(output_dir, k_filter, quartile_filter, filename="wealth_index.png"):
+def plot_wealth_index(output_dir, k_filter, quartile_filter, filename="wealth_index.png", width=12, height=6, font_size="x-small"):
     padrao_busca = os.path.join(output_dir, f"oos_ts_*_K{k_filter}_Q{int(quartile_filter * 100)}.csv")
     arquivos = sorted(glob.glob(padrao_busca))
 
@@ -173,7 +173,7 @@ def plot_wealth_index(output_dir, k_filter, quartile_filter, filename="wealth_in
         write_validation_report(output_dir, "plot_validation_report.txt", relatorio)
         return
 
-    fig, ax = plt.subplots(figsize=(12, 6))
+    fig, ax = plt.subplots(figsize=(width, height))
 
     for coluna in [c for c in ordem_esperada if c in df_acumulado.columns]:
         if "Risk Parity" in coluna:
@@ -191,18 +191,17 @@ def plot_wealth_index(output_dir, k_filter, quartile_filter, filename="wealth_in
             ax.plot(df_acumulado.index, df_acumulado[coluna], label=coluna, alpha=0.8)
 
     ax.xaxis.set_major_locator(ticker.MaxNLocator(nbins=20))
-    ax.tick_params(axis="x", rotation=90, labelsize="x-small")
-    ax.set_ylabel("Retorno Acumulado")
+    ax.tick_params(axis="x", rotation=90, labelsize=font_size)
+    ax.tick_params(axis="y", labelsize=font_size)
+    ax.set_ylabel("Retorno Acumulado", fontsize=font_size)
+    ax.set_xlabel("Data de Referencia", fontsize=font_size)
     ax.axhline(0.0, color="black", linewidth=0.8, linestyle=":")
     ax.grid(True, alpha=0.3, linestyle="--")
 
-    #fig.suptitle(
-    #    f"Evolucao do Retorno Acumulado - K={k_filter}, Top {int(quartile_filter * 100)}% Sharpe",
-    #    fontweight="bold",
-    #)
-    ax.set_xlabel("Data de Referencia")
     handles, labels = ax.get_legend_handles_labels()
-    fig.legend(handles, labels, loc="upper center", bbox_to_anchor=(0.5, 0.03), ncol=4, frameon=True)
+    # Aplicando font_size à legenda via parâmetro fontsize
+    fig.legend(handles, labels, loc="upper center", bbox_to_anchor=(0.5, 0.03), ncol=4, frameon=True, fontsize=font_size)
+    
     plt.tight_layout(rect=(0, 0.06, 1, 0.95))
     caminho_saida = os.path.join(output_dir, filename)
     fig.savefig(caminho_saida, dpi=300, bbox_inches="tight")
@@ -224,6 +223,17 @@ if __name__ == "__main__":
     parser.add_argument("--k", type=int, required=True)
     parser.add_argument("--quartile", type=float, required=True)
     parser.add_argument("--filename", type=str, default="plot_portfolio.png")
+    parser.add_argument("--width", type=float, default=12.0)
+    parser.add_argument("--height", type=float, default=6.0)
+    parser.add_argument("--font", type=str, default="x-small")
 
     args = parser.parse_args()
-    plot_wealth_index(args.output_dir, args.k, args.quartile, args.filename)
+    plot_wealth_index(
+        args.output_dir, 
+        args.k, 
+        args.quartile, 
+        args.filename, 
+        args.width, 
+        args.height, 
+        args.font
+    )
