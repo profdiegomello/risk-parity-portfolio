@@ -1,0 +1,14 @@
+RELATORIO DE VALIDACAO DO PLOT
+Diretorio: LAPO/LAPO-20/LAPO-K-20-Sharpe-25-Dataset-3/
+K: 20
+Quartil: 0.25
+
+[OK] Min Variance (GMV): 993 observacoes de 2022-01-11 ate 2025-12-30 (oos_ts_gmv_K20_Q25.csv)
+[OK] Naive (1/K): 993 observacoes de 2022-01-11 ate 2025-12-30 (oos_ts_naive_K20_Q25.csv)
+[OK] Risk Parity (Convex): 993 observacoes de 2022-01-11 ate 2025-12-30 (oos_ts_rp_convex_K20_Q25.csv)
+[OK] Risk Parity (Non-Convex): 993 observacoes de 2022-01-11 ate 2025-12-30 (oos_ts_rp_nonconvex_K20_Q25.csv)
+
+Janela comum usada no grafico: 2022-01-11 ate 2025-12-30
+
+Series finais no painel: Risk Parity (Convex), Risk Parity (Non-Convex), Min Variance (GMV), Naive (1/K)
+Numero final de datas plotadas: 993
