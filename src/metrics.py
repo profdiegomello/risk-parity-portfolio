@@ -71,18 +71,16 @@ def sortino_ratio(returns_series, rf_series, periods_per_year=252):
         return np.nan
 
     excess_returns = returns_series - rf_series
-    downside_diff = excess_returns[excess_returns < 0]
     
-    if len(downside_diff) == 0:
-        return 0.0
-        
+    # Extrai a penalidade negativa, mantendo 0 para os dias positivos (tamanho T)
+    downside_diff = np.minimum(0, excess_returns)
     downside_deviation = np.sqrt(np.mean(downside_diff**2))
     
     if downside_deviation < 1e-6:
         return 0.0
         
     return (excess_returns.mean() / downside_deviation) * np.sqrt(periods_per_year)
-
+    
 def maximum_drawdown(returns_series):
     returns_series = _clean_numeric_series(returns_series)
     if returns_series.empty or _has_invalid_compounding_returns(returns_series):
